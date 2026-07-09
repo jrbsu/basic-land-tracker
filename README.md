@@ -2,7 +2,7 @@
 
 A small local Flask app for visually tracking which Magic: The Gathering basic lands you own from each set.
 
-> **Disclosure:** This is a personal desktop/web app intended for tracking my own basic land collection. It was built with the help of Claude Code; all AI-generated components have been manually reviewed and tested to ensure stability and security.
+> **Disclosure:** This is a personal desktop/web app intended for tracking my own basic land collection as a collaboration between @jamesryanalexander and @jrbsu. It was built with the help of Claude Code; all AI-generated components have been manually reviewed and tested to ensure stability and security.
 
 It uses:
 
