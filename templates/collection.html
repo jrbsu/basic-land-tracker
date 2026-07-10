@@ -56,7 +56,10 @@
 </section>
 
 <section class="card-panel collection-panel">
-  <h2>My collection ({{ entries|length }})</h2>
+  <div class="collection-panel-head">
+    <h2>My collection ({{ entries|length }})</h2>
+    <a class="button" href="{{ url_for('collection_export_csv') }}">Export as CSV</a>
+  </div>
   {% if entries %}
     <div class="table-scroll">
       <table class="collection-table">

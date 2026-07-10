@@ -20,6 +20,7 @@ import urllib.request
 import ijson
 from flask import (
     Flask,
+    Response,
     flash,
     g,
     jsonify,
@@ -957,6 +958,45 @@ def collection() -> str:
         entries=owned_collection_rows(),
         finish_order=FINISH_ORDER,
         stats=global_stats(),
+    )
+
+
+# Column order matches the aliases `match_collection_row` checks first, so a file
+# exported here re-imports as an exact scryfall_id match with no fuzzy fallback.
+COLLECTION_EXPORT_HEADERS = [
+    "scryfall_id",
+    "name",
+    "set_code",
+    "set_name",
+    "collector_number",
+    "finish",
+    "quantity",
+]
+
+
+@app.get("/collection/export.csv")
+def collection_export_csv():
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(COLLECTION_EXPORT_HEADERS)
+    for entry in owned_collection_rows():
+        writer.writerow(
+            [
+                entry["scryfall_id"],
+                entry["name"],
+                entry["set_code"],
+                entry["set_name"],
+                entry["collector_number"],
+                entry["owned_finish"],
+                entry["quantity"],
+            ]
+        )
+
+    filename = f"basic-land-collection-{now_iso()[:10]}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

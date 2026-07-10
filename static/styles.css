@@ -635,6 +635,18 @@ th {
   margin-bottom: 1rem;
 }
 
+.collection-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.collection-panel-head h2 {
+  margin: 0;
+}
+
 .add-land-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.6fr);
