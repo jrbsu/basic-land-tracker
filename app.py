@@ -13,11 +13,17 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
+import urllib.error
+import urllib.parse
+import urllib.request
+
 import ijson
 from flask import (
     Flask,
+    Response,
     flash,
     g,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -229,6 +235,40 @@ def derive_treatment(card: Dict[str, Any]) -> str:
     return "Regular"
 
 
+class ScryfallError(RuntimeError):
+    """Raised when the Scryfall API cannot be reached or returns an unexpected error."""
+
+
+class ScryfallNotFound(ScryfallError):
+    """Raised when Scryfall has no card for the requested set/collector number."""
+
+
+SCRYFALL_HEADERS = {
+    "User-Agent": "BasicLandTracker/1.0 (local desktop app)",
+    "Accept": "application/json;q=0.9,*/*;q=0.8",
+}
+
+
+def fetch_scryfall_card(set_code: str, collector_number: str) -> Dict[str, Any]:
+    """Look up a single printing directly from the Scryfall API."""
+    url = "https://api.scryfall.com/cards/{}/{}".format(
+        urllib.parse.quote(set_code, safe=""),
+        urllib.parse.quote(collector_number, safe=""),
+    )
+    req = urllib.request.Request(url, headers=SCRYFALL_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise ScryfallNotFound(f"No Scryfall card found for set '{set_code}' #{collector_number}.") from exc
+        raise ScryfallError(f"Scryfall returned HTTP {exc.code}.") from exc
+    except urllib.error.URLError as exc:
+        raise ScryfallError(f"Could not reach Scryfall: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise ScryfallError("Scryfall request timed out.") from exc
+
+
 def get_image_uris(card: Dict[str, Any]) -> Tuple[str, str]:
     image_uris = card.get("image_uris") or {}
     if not image_uris and card.get("card_faces"):
@@ -331,6 +371,90 @@ def log_import(
 # Importers
 # -----------------------------------------------------------------------------
 
+CARD_UPSERT_SQL = """
+    INSERT INTO cards (
+        scryfall_id, oracle_id, name, land_type, set_code, set_name, set_type, released_at,
+        collector_number, collector_sort, lang, layout, image_small, image_normal, scryfall_uri,
+        finishes_json, nonfoil, foil, etched, full_art, promo, variation, digital,
+        border_color, frame, rarity, artist, treatment, imported_at
+    ) VALUES (
+        :scryfall_id, :oracle_id, :name, :land_type, :set_code, :set_name, :set_type, :released_at,
+        :collector_number, :collector_sort, :lang, :layout, :image_small, :image_normal, :scryfall_uri,
+        :finishes_json, :nonfoil, :foil, :etched, :full_art, :promo, :variation, :digital,
+        :border_color, :frame, :rarity, :artist, :treatment, :imported_at
+    )
+    ON CONFLICT(scryfall_id) DO UPDATE SET
+        oracle_id=excluded.oracle_id,
+        name=excluded.name,
+        land_type=excluded.land_type,
+        set_code=excluded.set_code,
+        set_name=excluded.set_name,
+        set_type=excluded.set_type,
+        released_at=excluded.released_at,
+        collector_number=excluded.collector_number,
+        collector_sort=excluded.collector_sort,
+        lang=excluded.lang,
+        layout=excluded.layout,
+        image_small=excluded.image_small,
+        image_normal=excluded.image_normal,
+        scryfall_uri=excluded.scryfall_uri,
+        finishes_json=excluded.finishes_json,
+        nonfoil=excluded.nonfoil,
+        foil=excluded.foil,
+        etched=excluded.etched,
+        full_art=excluded.full_art,
+        promo=excluded.promo,
+        variation=excluded.variation,
+        digital=excluded.digital,
+        border_color=excluded.border_color,
+        frame=excluded.frame,
+        rarity=excluded.rarity,
+        artist=excluded.artist,
+        treatment=excluded.treatment,
+        imported_at=excluded.imported_at
+"""
+
+
+def build_card_row(card: Dict[str, Any], imported_at: str) -> Optional[Dict[str, Any]]:
+    """Turn a raw Scryfall card object into a `cards` table row, or None if it has no finishes."""
+    small, normal = get_image_uris(card)
+    finishes = [f for f in (card.get("finishes") or []) if f in FINISH_ORDER]
+    if not finishes:
+        return None
+
+    return {
+        "scryfall_id": card.get("id"),
+        "oracle_id": card.get("oracle_id"),
+        "name": card.get("name"),
+        "land_type": card.get("name"),
+        "set_code": (card.get("set") or "").lower(),
+        "set_name": card.get("set_name") or "Unknown set",
+        "set_type": card.get("set_type"),
+        "released_at": card.get("released_at"),
+        "collector_number": str(card.get("collector_number") or ""),
+        "collector_sort": collector_sort_value(str(card.get("collector_number") or "")),
+        "lang": card.get("lang"),
+        "layout": card.get("layout"),
+        "image_small": small,
+        "image_normal": normal,
+        "scryfall_uri": card.get("scryfall_uri"),
+        "finishes_json": json.dumps(finishes),
+        "nonfoil": bool_int("nonfoil" in finishes),
+        "foil": bool_int("foil" in finishes),
+        "etched": bool_int("etched" in finishes),
+        "full_art": bool_int(card.get("full_art")),
+        "promo": bool_int(card.get("promo")),
+        "variation": bool_int(card.get("variation")),
+        "digital": bool_int(card.get("digital")),
+        "border_color": card.get("border_color"),
+        "frame": card.get("frame"),
+        "rarity": card.get("rarity"),
+        "artist": card.get("artist"),
+        "treatment": derive_treatment(card),
+        "imported_at": imported_at,
+    }
+
+
 def import_scryfall_bulk(path: Path, replace_existing: bool = True, paper_only: bool = True) -> Dict[str, Any]:
     db = get_db()
     rows_seen = 0
@@ -341,54 +465,11 @@ def import_scryfall_bulk(path: Path, replace_existing: bool = True, paper_only: 
     # import finishes we can remove stale catalogue rows while preserving ownership
     # for cards that still exist in the refreshed data.
 
-    sql = """
-        INSERT INTO cards (
-            scryfall_id, oracle_id, name, land_type, set_code, set_name, set_type, released_at,
-            collector_number, collector_sort, lang, layout, image_small, image_normal, scryfall_uri,
-            finishes_json, nonfoil, foil, etched, full_art, promo, variation, digital,
-            border_color, frame, rarity, artist, treatment, imported_at
-        ) VALUES (
-            :scryfall_id, :oracle_id, :name, :land_type, :set_code, :set_name, :set_type, :released_at,
-            :collector_number, :collector_sort, :lang, :layout, :image_small, :image_normal, :scryfall_uri,
-            :finishes_json, :nonfoil, :foil, :etched, :full_art, :promo, :variation, :digital,
-            :border_color, :frame, :rarity, :artist, :treatment, :imported_at
-        )
-        ON CONFLICT(scryfall_id) DO UPDATE SET
-            oracle_id=excluded.oracle_id,
-            name=excluded.name,
-            land_type=excluded.land_type,
-            set_code=excluded.set_code,
-            set_name=excluded.set_name,
-            set_type=excluded.set_type,
-            released_at=excluded.released_at,
-            collector_number=excluded.collector_number,
-            collector_sort=excluded.collector_sort,
-            lang=excluded.lang,
-            layout=excluded.layout,
-            image_small=excluded.image_small,
-            image_normal=excluded.image_normal,
-            scryfall_uri=excluded.scryfall_uri,
-            finishes_json=excluded.finishes_json,
-            nonfoil=excluded.nonfoil,
-            foil=excluded.foil,
-            etched=excluded.etched,
-            full_art=excluded.full_art,
-            promo=excluded.promo,
-            variation=excluded.variation,
-            digital=excluded.digital,
-            border_color=excluded.border_color,
-            frame=excluded.frame,
-            rarity=excluded.rarity,
-            artist=excluded.artist,
-            treatment=excluded.treatment,
-            imported_at=excluded.imported_at
-    """
-
     batch: List[Dict[str, Any]] = []
     for card in iter_scryfall_cards(path):
         rows_seen += 1
         if rows_seen % 50000 == 0:
-            db.executemany(sql, batch)
+            db.executemany(CARD_UPSERT_SQL, batch)
             db.commit()
             batch.clear()
 
@@ -397,47 +478,15 @@ def import_scryfall_bulk(path: Path, replace_existing: bool = True, paper_only: 
         if not is_basic_land_card(card, include_extras=True):
             continue
 
-        small, normal = get_image_uris(card)
-        finishes = [f for f in (card.get("finishes") or []) if f in FINISH_ORDER]
-        if not finishes:
+        row = build_card_row(card, timestamp)
+        if row is None:
             continue
 
-        row = {
-            "scryfall_id": card.get("id"),
-            "oracle_id": card.get("oracle_id"),
-            "name": card.get("name"),
-            "land_type": card.get("name"),
-            "set_code": (card.get("set") or "").lower(),
-            "set_name": card.get("set_name") or "Unknown set",
-            "set_type": card.get("set_type"),
-            "released_at": card.get("released_at"),
-            "collector_number": str(card.get("collector_number") or ""),
-            "collector_sort": collector_sort_value(str(card.get("collector_number") or "")),
-            "lang": card.get("lang"),
-            "layout": card.get("layout"),
-            "image_small": small,
-            "image_normal": normal,
-            "scryfall_uri": card.get("scryfall_uri"),
-            "finishes_json": json.dumps(finishes),
-            "nonfoil": bool_int("nonfoil" in finishes),
-            "foil": bool_int("foil" in finishes),
-            "etched": bool_int("etched" in finishes),
-            "full_art": bool_int(card.get("full_art")),
-            "promo": bool_int(card.get("promo")),
-            "variation": bool_int(card.get("variation")),
-            "digital": bool_int(card.get("digital")),
-            "border_color": card.get("border_color"),
-            "frame": card.get("frame"),
-            "rarity": card.get("rarity"),
-            "artist": card.get("artist"),
-            "treatment": derive_treatment(card),
-            "imported_at": timestamp,
-        }
         batch.append(row)
         rows_imported += 1
 
     if batch:
-        db.executemany(sql, batch)
+        db.executemany(CARD_UPSERT_SQL, batch)
         db.commit()
 
     if replace_existing:
@@ -886,6 +935,182 @@ def imports() -> str:
 
     stats = global_stats()
     return render_template("imports.html", stats=stats)
+
+
+def owned_collection_rows() -> List[Dict[str, Any]]:
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT c.*, o.finish AS owned_finish, o.quantity, o.source, o.updated_at
+        FROM owned o
+        JOIN cards c ON c.scryfall_id = o.scryfall_id
+        WHERE o.quantity > 0
+        ORDER BY o.updated_at DESC, c.name ASC, c.set_code ASC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.route("/collection")
+def collection() -> str:
+    return render_template(
+        "collection.html",
+        entries=owned_collection_rows(),
+        finish_order=FINISH_ORDER,
+        stats=global_stats(),
+    )
+
+
+# Column order matches the aliases `match_collection_row` checks first, so a file
+# exported here re-imports as an exact scryfall_id match with no fuzzy fallback.
+COLLECTION_EXPORT_HEADERS = [
+    "scryfall_id",
+    "name",
+    "set_code",
+    "set_name",
+    "collector_number",
+    "finish",
+    "quantity",
+]
+
+
+@app.get("/collection/export.csv")
+def collection_export_csv():
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(COLLECTION_EXPORT_HEADERS)
+    for entry in owned_collection_rows():
+        writer.writerow(
+            [
+                entry["scryfall_id"],
+                entry["name"],
+                entry["set_code"],
+                entry["set_name"],
+                entry["collector_number"],
+                entry["owned_finish"],
+                entry["quantity"],
+            ]
+        )
+
+    filename = f"basic-land-collection-{now_iso()[:10]}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/card-lookup")
+def api_card_lookup():
+    set_code = request.args.get("set", "").strip().lower()
+    collector_number = request.args.get("cn", "").strip()
+    if not set_code or not collector_number:
+        return jsonify(ok=False, error="Enter a set code and collector number."), 400
+
+    try:
+        card = fetch_scryfall_card(set_code, collector_number)
+    except ScryfallNotFound as exc:
+        return jsonify(ok=False, error=str(exc)), 404
+    except ScryfallError as exc:
+        return jsonify(ok=False, error=str(exc)), 502
+
+    if not is_basic_land_card(card, include_extras=True):
+        return (
+            jsonify(
+                ok=False,
+                error=f"{card.get('name', 'That card')} isn't a supported basic land "
+                "(this tracker only handles English basic lands, Wastes, and snow basics).",
+            ),
+            422,
+        )
+
+    finishes = [f for f in (card.get("finishes") or []) if f in FINISH_ORDER]
+    if not finishes:
+        return jsonify(ok=False, error=f"{card.get('name')} has no trackable finishes on Scryfall."), 422
+
+    small, _normal = get_image_uris(card)
+    return jsonify(
+        ok=True,
+        scryfall_id=card.get("id"),
+        name=card.get("name"),
+        set_code=(card.get("set") or "").lower(),
+        set_name=card.get("set_name"),
+        collector_number=str(card.get("collector_number") or ""),
+        image_small=small,
+        scryfall_uri=card.get("scryfall_uri"),
+        finishes=finishes,
+    )
+
+
+@app.post("/collection/add")
+def collection_add():
+    set_code = request.form.get("set_code", "").strip().lower()
+    collector_number = request.form.get("collector_number", "").strip()
+    finish = request.form.get("finish", "").strip().lower()
+    quantity = parse_quantity(request.form.get("quantity", "1"))
+
+    if not set_code or not collector_number:
+        flash("Enter a set code and collector number.", "error")
+        return redirect(url_for("collection"))
+    if finish not in FINISH_ORDER:
+        flash(f"Unknown finish: {finish}", "error")
+        return redirect(url_for("collection"))
+    if quantity <= 0:
+        flash("Quantity must be at least 1.", "error")
+        return redirect(url_for("collection"))
+
+    try:
+        card = fetch_scryfall_card(set_code, collector_number)
+    except ScryfallError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("collection"))
+
+    if not is_basic_land_card(card, include_extras=True):
+        flash(
+            f"{card.get('name', 'That card')} isn't a supported basic land "
+            "(this tracker only handles English basic lands, Wastes, and snow basics).",
+            "error",
+        )
+        return redirect(url_for("collection"))
+
+    finishes = [f for f in (card.get("finishes") or []) if f in FINISH_ORDER]
+    if finish not in finishes:
+        flash(
+            f"{card.get('name')} ({set_code.upper()} #{collector_number}) has no {finish} finish on Scryfall.",
+            "error",
+        )
+        return redirect(url_for("collection"))
+
+    timestamp = now_iso()
+    db = get_db()
+    row = build_card_row(card, timestamp)
+    db.execute(CARD_UPSERT_SQL, row)
+    db.execute(
+        """
+        INSERT INTO owned (scryfall_id, finish, quantity, source, updated_at)
+        VALUES (:scryfall_id, :finish, :quantity, 'manual-entry', :updated_at)
+        ON CONFLICT(scryfall_id, finish) DO UPDATE SET
+            quantity = owned.quantity + excluded.quantity,
+            source = excluded.source,
+            updated_at = excluded.updated_at
+        """,
+        {"scryfall_id": card.get("id"), "finish": finish, "quantity": quantity, "updated_at": timestamp},
+    )
+    db.commit()
+    flash(
+        f"Added {quantity} × {card.get('name')} ({set_code.upper()} #{collector_number}, {finish}) to your collection.",
+        "success",
+    )
+    return redirect(url_for("collection"))
+
+
+@app.post("/collection/delete/<scryfall_id>/<finish>")
+def collection_delete(scryfall_id: str, finish: str):
+    db = get_db()
+    db.execute("DELETE FROM owned WHERE scryfall_id = ? AND finish = ?", (scryfall_id, finish))
+    db.commit()
+    flash("Removed from your collection.", "success")
+    return redirect(url_for("collection"))
 
 
 @app.post("/toggle/<scryfall_id>/<finish>")

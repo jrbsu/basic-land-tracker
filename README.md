@@ -2,13 +2,15 @@
 
 A small local Flask app for visually tracking which Magic: The Gathering basic lands you own from each set.
 
+> **Disclosure:** This is a personal desktop/web app intended for tracking my own basic land collection as a collaboration between [@jamesryanalexander](https://github.com/jamesryanalexander) and [@jrbsu](https://github.com/jrbsu). It was built with the help of Claude Code; all AI-generated components have been manually reviewed and tested to ensure stability and security.
+
 It uses:
 
 - **Scryfall bulk JSON** as the card/image catalogue.
 - **A Moxfield-style CSV export** as the ownership overlay.
 - **SQLite** for local storage.
 - **Manual finish toggles** in the UI for cleanup and edge cases.
-
+ 
 ## What it tracks
 
 By default the grid shows the five normal basic land names:
@@ -108,6 +110,24 @@ The importer tries to understand common column names, including:
 
 If a row cannot be matched to a Scryfall card in the local catalogue, it is skipped and counted as unmatched.
 
+## Add lands manually
+
+Go to:
+
+```text
+/collection
+```
+
+Enter a Scryfall set code (e.g. `znr`), a collector number, and a finish, then click
+`Check card on Scryfall` to fetch the card live from the Scryfall API and preview its
+image before adding it. Submitting the form looks the card up again server-side, adds
+it to the local catalogue (using its Scryfall ID), and records it as owned. If you're confident that the card exists you can submit the form directly without checking with scryfall. This will not use the live API.
+
+The same page lists your full manually tracked collection — name, set, collector
+number, Scryfall ID, a small image linking to the card on Scryfall, and a delete
+button for each entry. The `check card` button talks to the live Scryfall API, so it needs an internet
+connection (unlike the rest of the app).
+
 ## Manual cleanup
 
 Click a finish badge on any card to toggle ownership for that finish.
@@ -117,6 +137,12 @@ This is useful when:
 - a collection export is missing finish data
 - a card matched but the finish was wrong
 - you want to track a few cards manually before importing a full collection
+
+## Export Collection
+
+You can export a CSV of the ownership information on either the Collection page or the Import page.
+
+This is designed to let you move servers/systems easily and is comptabile with the import function.
 
 ## Notes and limitations
 

@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% block title %}My Collection · Basic Land Tracker{% endblock %}
+{% block content %}
+<section class="stats-row">
+  <div class="stat"><strong>{{ stats.set_count }}</strong><span>sets</span></div>
+  <div class="stat"><strong>{{ stats.card_count }}</strong><span>printings</span></div>
+  <div class="stat"><strong>{{ stats.owned_finishes }}/{{ stats.needed_finishes }}</strong><span>finishes owned</span></div>
+  <div class="stat"><strong>{{ stats.percent }}%</strong><span>complete</span></div>
+</section>
+
+<section class="card-panel add-land-panel">
+  <h2>Add a land manually</h2>
+  <p>
+    Enter the Scryfall set code and collector number. Use <strong>Check card</strong> to fetch the card from
+    Scryfall and confirm it's the right printing before adding it.
+  </p>
+  <form id="add-land-form" method="post" action="{{ url_for('collection_add') }}" class="add-land-form">
+    <div class="add-land-fields">
+      <label>
+        Scryfall set code
+        <input type="text" id="set_code" name="set_code" placeholder="e.g. znr" autocomplete="off" required>
+      </label>
+      <label>
+        Collector number
+        <input type="text" id="collector_number" name="collector_number" placeholder="e.g. 260" autocomplete="off" required>
+      </label>
+      <label>
+        Finish
+        <select id="finish" name="finish" required>
+          {% for finish in finish_order %}
+            <option value="{{ finish }}">{{ finish|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Quantity
+        <input type="number" id="quantity" name="quantity" min="1" value="1">
+      </label>
+    </div>
+    <div class="add-land-actions">
+      <button type="button" id="lookup-btn" class="ghost">Check card on Scryfall</button>
+      <button type="submit" id="add-btn">Add to my collection</button>
+    </div>
+    <p id="lookup-status" class="lookup-status" role="status"></p>
+    <div id="lookup-preview" class="lookup-preview" hidden>
+      <a id="lookup-preview-link" href="#" target="_blank" rel="noopener">
+        <img id="lookup-preview-img" src="" alt="Card preview">
+      </a>
+      <div class="lookup-preview-meta">
+        <strong id="lookup-preview-name"></strong>
+        <span id="lookup-preview-set"></span>
+        <span id="lookup-preview-id" class="mono"></span>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="card-panel collection-panel">
+  <div class="collection-panel-head">
+    <h2>My collection ({{ entries|length }})</h2>
+    <a class="button" href="{{ url_for('collection_export_csv') }}">Export as CSV</a>
+  </div>
+  {% if entries %}
+    <div class="table-scroll">
+      <table class="collection-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Name</th>
+            <th>Set</th>
+            <th>Collector #</th>
+            <th>Finish</th>
+            <th>Qty</th>
+            <th>Scryfall ID</th>
+            <th>Source</th>
+            <th>Added</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td class="thumb-cell">
+                <a href="{{ entry.scryfall_uri }}" target="_blank" rel="noopener" title="View {{ entry.name }} on Scryfall">
+                  {% if entry.image_small %}
+                    <img src="{{ entry.image_small }}" alt="{{ entry.name }}" class="thumb">
+                  {% else %}
+                    <span class="missing-image small">No image</span>
+                  {% endif %}
+                </a>
+              </td>
+              <td>{{ entry.name }}</td>
+              <td>{{ entry.set_name }} ({{ entry.set_code|upper }})</td>
+              <td>#{{ entry.collector_number }}</td>
+              <td>{{ entry.owned_finish|capitalize }}</td>
+              <td>{{ entry.quantity }}</td>
+              <td class="mono path-cell">{{ entry.scryfall_id }}</td>
+              <td>{{ entry.source }}</td>
+              <td>{{ entry.updated_at }}</td>
+              <td>
+                <form method="post"
+                      action="{{ url_for('collection_delete', scryfall_id=entry.scryfall_id, finish=entry.owned_finish) }}"
+                      onsubmit="return confirm('Remove {{ entry.name }} ({{ entry.owned_finish }}) from your collection?');">
+                  <button class="danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>No manually tracked lands yet. Add one above.</p>
+  {% endif %}
+</section>
+{% endblock %}

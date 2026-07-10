@@ -37,6 +37,7 @@
   <section class="card-panel">
     <h2>2. Import collection CSV</h2>
     <p>Best result: include a <code>Scryfall ID</code> column. Fallback matching uses name, set code/name, and collector number.</p>
+    <p>Moving to a new server or system? <a href="{{ url_for('collection_export_csv') }}">Export your current collection as CSV</a> first — it uses the exact column format this importer expects.</p>
     <form method="post" enctype="multipart/form-data" class="stacked">
       <input type="hidden" name="action" value="collection">
       <label>

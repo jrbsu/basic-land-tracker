@@ -627,3 +627,127 @@ th {
     margin-left: 0;
   }
 }
+
+/* Manual "My Collection" page */
+.add-land-panel,
+.collection-panel {
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.collection-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.collection-panel-head h2 {
+  margin: 0;
+}
+
+.add-land-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.6fr);
+  gap: 0.85rem;
+}
+
+.add-land-actions {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.lookup-status {
+  min-height: 1.2rem;
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.lookup-status.success {
+  color: var(--accent-2);
+}
+
+.lookup-status.error {
+  color: var(--danger);
+}
+
+.lookup-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--panel-2);
+}
+
+.lookup-preview img {
+  width: 4.5rem;
+  border-radius: 0.5rem;
+  display: block;
+}
+
+.lookup-preview-meta {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.lookup-preview-meta span {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.thumb-cell {
+  width: 3.5rem;
+}
+
+.thumb {
+  display: block;
+  width: 3rem;
+  border-radius: 0.4rem;
+}
+
+.missing-image.small {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  aspect-ratio: 488 / 680;
+  border-radius: 0.4rem;
+  color: var(--muted);
+  background: var(--panel-2);
+  font-size: 0.65rem;
+  text-align: center;
+}
+
+.collection-table td form {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .add-land-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 740px) {
+  .add-land-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .add-land-actions {
+    flex-direction: column;
+  }
+}
